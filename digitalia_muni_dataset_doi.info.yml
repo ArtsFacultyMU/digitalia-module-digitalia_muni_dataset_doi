@@ -1,0 +1,8 @@
+name: 'Digitalia MUNI Dataset DOI DataCite'
+type: module
+description: 'DataCite mapping for datasets'
+package: digitalia
+core_version_requirement: ^10 || ^11
+dependencies:
+  - doi_datacite
+# dataset content type (archaeovault)
