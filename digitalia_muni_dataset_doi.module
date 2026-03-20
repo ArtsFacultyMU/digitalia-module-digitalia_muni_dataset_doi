@@ -104,19 +104,7 @@ function digitalia_muni_dataset_doi_doi_datacite_json_alter($entity, $extra, &$d
 	$obj["data"]["attributes"]["types"]["resourceTypeGeneral"] = "Dataset";
 	$obj["data"]["attributes"]["publicationYear"] = $publication_year;
 
-	dump($obj);
-	$out_json = json_encode($obj);
-	dump($out_json);
-
-	do_crash();
-}
-
-/**
- * Helper debugging function
- */
-function do_crash() {
-	// intentionally crash drupal
-	array_keys($obj_NOTHING);
+	$datacite_json = json_encode($obj);
 }
 
 /**
