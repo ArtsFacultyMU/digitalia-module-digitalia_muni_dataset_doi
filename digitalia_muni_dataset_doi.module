@@ -95,7 +95,6 @@ function digitalia_muni_dataset_doi_doi_datacite_json_alter($entity, $extra, &$d
 
 	// resourceTypeGeneral
 	// We have to get title of different taxonomy with specified authority source iri
-	dump($entity->get("field_resource_type")->getValue());
 	$coar_resource_type_id = $entity->get("field_resource_type")->getValue()[0]["target_id"];
 	$coar_resource_type = \Drupal::entityTypeManager()->getStorage("taxonomy_term")->load($coar_resource_type_id);
 	$authority_links = $coar_resource_type->get("field_authority_link")->getValue();
@@ -112,7 +111,9 @@ function digitalia_muni_dataset_doi_doi_datacite_json_alter($entity, $extra, &$d
 
 	if (!is_null($datacite_iri)) {
 		$datacite_resource_type_list = \Drupal::entityTypeManager()->getStorage("taxonomy_term")->loadByProperties(["field_authority_link" => ["uri" => $datacite_iri], "vid" => "resource_types_datacite"]);
-		$datacite_resource_type = $datacite_resource_type_list[array_keys($datacite_resource_type_list)[0]]->label();
+		if (!empty($datacite_resource_type_list)) {
+			$datacite_resource_type = $datacite_resource_type_list[array_keys($datacite_resource_type_list)[0]]->label();
+		}
 	}
 
 
