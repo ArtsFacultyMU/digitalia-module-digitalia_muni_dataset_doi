@@ -1,5 +1,7 @@
 <?php
 
+use Drupal\Component\Utility\Xss;
+
 /**
  * @file
  * Primary module hooks for Digitalia muni dataset doi generator.
@@ -16,7 +18,8 @@
  *   The DataCite JSON. See https://support.datacite.org/docs/api-create-dois
  *   for more information.
  */
-function digitalia_muni_dataset_doi_doi_datacite_json_alter($entity, $extra, &$datacite_json) {
+function digitalia_muni_dataset_doi_doi_datacite_json_alter($entity, $extra, &$datacite_json)
+{
 	$obj = json_decode($datacite_json, true);
 
 	// Mandatory fields
@@ -27,7 +30,7 @@ function digitalia_muni_dataset_doi_doi_datacite_json_alter($entity, $extra, &$d
 	//
 	// Optional fields
 	// license
-	// absctact (description)
+	// abscract (description)
 	// language
 
 	// Could be cached somewhere, but this hook shouldn't run often enough for this to be a problem
@@ -55,6 +58,7 @@ function digitalia_muni_dataset_doi_doi_datacite_json_alter($entity, $extra, &$d
 	$agents_orgs_ids = array();
 	$creators = array();
 	$publishers = array();
+	$descriptions = get_output_descriptions($entity);
 
 	foreach ($agents_people as $agent_person) {
 		array_push($agents_people_ids, $agent_person["target_id"]);
@@ -117,13 +121,28 @@ function digitalia_muni_dataset_doi_doi_datacite_json_alter($entity, $extra, &$d
 	}
 
 
+
 	$obj["data"]["attributes"]["creators"] = $out_creators;
 	// only one publisher is permitted
 	$obj["data"]["attributes"]["publisher"] = $out_publishers[0];
 	$obj["data"]["attributes"]["types"]["resourceTypeGeneral"] = $datacite_resource_type;
 	$obj["data"]["attributes"]["publicationYear"] = $publication_year;
+	if (!empty($descriptions)) {
+		$obj["data"]["attributes"]["descriptions"] = $descriptions;
+	}
+
 
 	$datacite_json = json_encode($obj);
+	\Drupal::logger("dataset_doi_datacite_DEBUG")->debug("TEST");
+
+	
+	dump($obj);
+	do_crash();
+}
+
+function do_crash()
+{
+	array_keys($jdasklfjklj);
 }
 
 /**
@@ -143,7 +162,8 @@ function digitalia_muni_dataset_doi_doi_datacite_json_alter($entity, $extra, &$d
  * @return array
  *
  */
-function get_entities_with_agent_role($entity_type, array $entity_ids, $field_role, $field_related_entity, $role_tid) {
+function get_entities_with_agent_role($entity_type, array $entity_ids, $field_role, $field_related_entity, $role_tid)
+{
 	$output = array();
 
 	foreach ($entity_ids as $entity_id) {
@@ -167,7 +187,8 @@ function get_entities_with_agent_role($entity_type, array $entity_ids, $field_ro
  *
  * @return array
  */
-function get_output_creator($creator) {
+function get_output_creator($creator)
+{
 	$out_creator = array();
 	$identifiers = array();
 	$has_identifier = FALSE;
@@ -236,7 +257,8 @@ function get_output_creator($creator) {
  *
  * @return array
  */
-function get_output_publisher($publisher) {
+function get_output_publisher($publisher)
+{
 	$out_publisher = array();
 	$has_identifier = FALSE;
 
@@ -287,4 +309,51 @@ function get_output_publisher($publisher) {
 	if (!empty($out_publisher)) {
 		return $out_publisher;
 	}
+}
+
+function get_output_descriptions(&$entity)
+{
+	$descriptions = array();
+	$abstract = $entity->get("field_abstract")->getValue();
+	$methods = $entity->get("field_methods")->getValue();
+	$series_information = $entity->get("field_series_information")->getValue();
+	$table_of_contents = $entity->get("field_table_of_contents")->getValue();
+	$technical_info = $entity->get("field_technical_info")->getValue();
+
+	if (!empty($abstract)) {
+		array_push($descriptions, [
+			"description" => Xss::filter($abstract[0]["value"]),
+			"descriptionType" => "Abstract",
+		]);
+	}
+
+	if (!empty($methods)) {
+		array_push($descriptions, [
+			"description" => Xss::filter($methods[0]["value"]),
+			"descriptionType" => "Methods",
+		]);
+	}
+
+	if (!empty($series_information)) {
+		array_push($descriptions, [
+			"description" => Xss::filter($series_information[0]["value"]),
+			"descriptionType" => "SeriesInformation",
+		]);
+	}
+
+	if (!empty($table_of_contents)) {
+		array_push($descriptions, [
+			"description" => Xss::filter($table_of_contents[0]["value"]),
+			"descriptionType" => "TableOfContents",
+		]);
+	}
+
+	if (!empty($abstract)) {
+		array_push($descriptions, [
+			"description" => Xss::filter($technical_info[0]["value"]),
+			"descriptionType" => "TechnicalInfo",
+		]);
+	}
+
+	return $descriptions;
 }
