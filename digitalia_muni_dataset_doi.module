@@ -59,6 +59,7 @@ function digitalia_muni_dataset_doi_doi_datacite_json_alter($entity, $extra, &$d
 	$creators = array();
 	$publishers = array();
 	$descriptions = get_output_descriptions($entity);
+	$data_service = $entity->get("field_data_service")->getValue();
 
 	foreach ($agents_people as $agent_person) {
 		array_push($agents_people_ids, $agent_person["target_id"]);
@@ -121,21 +122,31 @@ function digitalia_muni_dataset_doi_doi_datacite_json_alter($entity, $extra, &$d
 	}
 
 
+	if (!empty($data_service)) {
+		$obj["data"]["attributes"]["url"] = $data_service[0]["uri"];
+	}
+
+	if (!empty($descriptions)) {
+		$obj["data"]["attributes"]["descriptions"] = $descriptions;
+	}
 
 	$obj["data"]["attributes"]["creators"] = $out_creators;
 	// only one publisher is permitted
 	$obj["data"]["attributes"]["publisher"] = $out_publishers[0];
 	$obj["data"]["attributes"]["types"]["resourceTypeGeneral"] = $datacite_resource_type;
 	$obj["data"]["attributes"]["publicationYear"] = $publication_year;
-	if (!empty($descriptions)) {
-		$obj["data"]["attributes"]["descriptions"] = $descriptions;
+
+
+	// useless until update action is implemented
+	if (!empty($entity->get("field_doi")->getValue())) {
+		dump($entity->get("field_doi")->getValue());
+		unset($obj["data"]["attributes"]["event"]);
+		unset($obj["data"]["id"]);
 	}
 
 
 	$datacite_json = json_encode($obj);
-	\Drupal::logger("dataset_doi_datacite_DEBUG")->debug("TEST");
 
-	
 	dump($obj);
 	do_crash();
 }
