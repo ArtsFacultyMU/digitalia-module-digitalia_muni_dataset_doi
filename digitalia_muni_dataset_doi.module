@@ -23,21 +23,9 @@ function digitalia_muni_dataset_doi_doi_datacite_json_alter($entity, $extra, &$d
 	$obj = json_decode($datacite_json, true);
 	$config = \Drupal::config("digitalia_muni_dataset_doi.settings");
 
-	// Mandatory fields
-	// datacite resource type
-	// creator
-	// publisher
-	// publication year
-	//
-	// Optional fields
-	// license
-	// abscract (description)
-	// language
-
 	// Could be cached somewhere, but this hook shouldn't run often enough for this to be a problem
 	$creator_term = \Drupal::entityTypeManager()->getStorage("taxonomy_term")->loadByProperties(["field_authority_link" => ["uri" => "https://vocabs.ccmm.cz/registry/codelist/AgentRole/Creator"]]);
 	$publisher_term = \Drupal::entityTypeManager()->getStorage("taxonomy_term")->loadByProperties(["field_authority_link" => ["uri" => "https://vocabs.ccmm.cz/registry/codelist/AgentRole/Publisher"]]);
-
 
 	if (empty($creator_term)) {
 		\Drupal::logger("dataset_doi_datacite")->error("Failed to get tid of 'Creator' term.");
@@ -79,9 +67,6 @@ function digitalia_muni_dataset_doi_doi_datacite_json_alter($entity, $extra, &$d
 
 	$creators = array_merge($people_creators, $orgs_creators);
 	$publishers = array_merge($people_publishers, $orgs_publishers);
-
-
-
 	$out_creators = array();
 	$out_publishers= array();
 
@@ -95,10 +80,8 @@ function digitalia_muni_dataset_doi_doi_datacite_json_alter($entity, $extra, &$d
 		array_push($out_publishers, get_output_publisher($publisher));
 	}
 
-
 	// publicationYear
 	$publication_year = $entity->get("field_publication_year")->getValue()[0]["value"];
-
 
 	// resourceTypeGeneral
 	// We have to get title of different taxonomy with specified authority source iri
@@ -117,13 +100,18 @@ function digitalia_muni_dataset_doi_doi_datacite_json_alter($entity, $extra, &$d
 	$datacite_resource_type = "Other";
 
 	if (!is_null($datacite_iri)) {
-		$datacite_resource_type_list = \Drupal::entityTypeManager()->getStorage("taxonomy_term")->loadByProperties(["field_authority_link" => ["uri" => $datacite_iri], "vid" => "resource_types_datacite"]);
+		$datacite_resource_type_list = \Drupal::entityTypeManager()->getStorage("taxonomy_term")->loadByProperties([
+			"field_authority_link" => ["uri" => $datacite_iri],
+			"vid" => "resource_types_datacite"
+		]);
+
 		if (!empty($datacite_resource_type_list)) {
 			$datacite_resource_type = $datacite_resource_type_list[array_keys($datacite_resource_type_list)[0]]->label();
 		}
 	}
 
 
+	// Populate output json
 	if ($data_service_is_url && !empty($data_service)) {
 		$obj["data"]["attributes"]["url"] = $data_service[0]["uri"];
 	}
@@ -144,10 +132,12 @@ function digitalia_muni_dataset_doi_doi_datacite_json_alter($entity, $extra, &$d
 		unset($obj["data"]["id"]);
 	}
 
-
 	$datacite_json = json_encode($obj);
 }
 
+/**
+ * Crashes drupal, useful for stopping request to DOI api
+ */
 function do_crash()
 {
 	array_keys($jdasklfjklj);
@@ -294,7 +284,6 @@ function get_output_publisher($publisher)
 		$identifier = $publisher->get("field_orcid")->getValue()[0]["value"];
 		$identifier_scheme = "ORCID";
 		$identifier_scheme_uri = "https://orcid.org/";
-
 	}
 
 	if ($publisher->bundle() == "organisation") {
@@ -320,7 +309,9 @@ function get_output_publisher($publisher)
 }
 
 /**
- * Returns array with description. Taking entity as reference can be considered questionable
+ * Returns array with description. All tags are removed.
+ *
+ * Taking entity as reference can be considered questionable
  *
  * @param ContentEntityBase $entity
  *
