@@ -21,6 +21,7 @@ use Drupal\Component\Utility\Xss;
 function digitalia_muni_dataset_doi_doi_datacite_json_alter($entity, $extra, &$datacite_json)
 {
 	$obj = json_decode($datacite_json, true);
+	$config = \Drupal::config("digitalia_muni_dataset_doi.settings");
 
 	// Mandatory fields
 	// datacite resource type
@@ -60,6 +61,7 @@ function digitalia_muni_dataset_doi_doi_datacite_json_alter($entity, $extra, &$d
 	$publishers = array();
 	$descriptions = get_output_descriptions($entity);
 	$data_service = $entity->get("field_data_service")->getValue();
+	$data_service_is_url = $config->get("data_service_is_url");
 
 	foreach ($agents_people as $agent_person) {
 		array_push($agents_people_ids, $agent_person["target_id"]);
@@ -122,7 +124,7 @@ function digitalia_muni_dataset_doi_doi_datacite_json_alter($entity, $extra, &$d
 	}
 
 
-	if (!empty($data_service)) {
+	if ($data_service_is_url && !empty($data_service)) {
 		$obj["data"]["attributes"]["url"] = $data_service[0]["uri"];
 	}
 
@@ -136,19 +138,14 @@ function digitalia_muni_dataset_doi_doi_datacite_json_alter($entity, $extra, &$d
 	$obj["data"]["attributes"]["types"]["resourceTypeGeneral"] = $datacite_resource_type;
 	$obj["data"]["attributes"]["publicationYear"] = $publication_year;
 
-
 	// useless until update action is implemented
 	if (!empty($entity->get("field_doi")->getValue())) {
-		dump($entity->get("field_doi")->getValue());
 		unset($obj["data"]["attributes"]["event"]);
 		unset($obj["data"]["id"]);
 	}
 
 
 	$datacite_json = json_encode($obj);
-
-	dump($obj);
-	do_crash();
 }
 
 function do_crash()
@@ -322,6 +319,13 @@ function get_output_publisher($publisher)
 	}
 }
 
+/**
+ * Returns array with description. Taking entity as reference can be considered questionable
+ *
+ * @param ContentEntityBase $entity
+ *
+ * @return array
+ */
 function get_output_descriptions(&$entity)
 {
 	$descriptions = array();
