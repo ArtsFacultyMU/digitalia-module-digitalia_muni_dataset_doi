@@ -23,70 +23,96 @@ function digitalia_muni_dataset_doi_doi_datacite_json_alter($entity, $extra, &$d
 	$obj = json_decode($datacite_json, true);
 	$config = \Drupal::config("digitalia_muni_dataset_doi.settings");
 
-	// Could be cached somewhere, but this hook shouldn't run often enough for this to be a problem
-	$creator_term = \Drupal::entityTypeManager()->getStorage("taxonomy_term")->loadByProperties(["field_authority_link" => ["uri" => "https://vocabs.ccmm.cz/registry/codelist/AgentRole/Creator"]]);
-	$publisher_term = \Drupal::entityTypeManager()->getStorage("taxonomy_term")->loadByProperties(["field_authority_link" => ["uri" => "https://vocabs.ccmm.cz/registry/codelist/AgentRole/Publisher"]]);
+	// Parse creators.
+	$creators = $entity->get("field_creator");
+  $out_creators = [];
 
-	if (empty($creator_term)) {
-		\Drupal::logger("dataset_doi_datacite")->error("Failed to get tid of 'Creator' term.");
-		$datacite_json = null;
-		return;
+	if (!empty($creators)) {
+		foreach ($creators as $delta => $creator_item) {
+			$out_creator = get_datacite_agents_array($creator_item);
+			if (!empty($out_creator)) {
+				$out_creators[] = $out_creator;
+			} else {
+        \Drupal::logger("dataset_doi_datacite")->error("Creator could not be converted to DataCite format.");
+      }
+    }
+	}
+    
+  if (!empty($out_creators)) {
+    $obj["data"]["attributes"]["creators"] = $out_creators;
+  } else {
+			\Drupal::logger("dataset_doi_datacite")->error("There must be at least one creator.");
 	}
 
-	if (empty($publisher_term)) {
-		\Drupal::logger("dataset_doi_datacite")->error("Failed to get tid of 'Publisher' term.");
-		$datacite_json = null;
-		return;
+	// Parse contributors
+  $contributors = $entity->get("field_contributor");
+  $out_contributors = [];
+	if (!empty($contributors)) {
+		foreach ($contributors as $delta => $contributor_item) {
+			$out_contributor = get_datacite_agents_array($contributor_item);
+			if (!empty($out_contributor)) {
+        $out_contributor["contributorType"] = $contributor_item->get("role")->getString();
+				$out_contributors[] = $out_contributor;
+			} else {
+        \Drupal::logger("dataset_doi_datacite")->error("Contributor could not be converted to DataCite format.");
+      }
+		}
 	}
 
-	$tid_creator = array_keys($creator_term)[0];
-	$tid_publisher = array_keys($publisher_term)[0];
-	$agents_people = $entity->get("field_related_people")->getValue();
-	$agents_orgs = $entity->get("field_creators_and_contributors")->getValue();
-	$agents_people_ids = array();
-	$agents_orgs_ids = array();
-	$creators = array();
-	$publishers = array();
+  if (!empty($out_contributors)) {
+    $obj["data"]["attributes"]["contributors"] = $out_contributors;
+  }
+
+	// Publishers
+  $publisher = $entity->get("field_publisher_dm")[0];
+  $publisher_name = $publisher->get("name")->getString();
+  $publisher_ror = $publisher->get("ror")->getString();
+
+  if (empty($publisher_name) || empty($publisher_ror)) {
+    \Drupal::logger("dataset_doi_datacite")->error("Dataset publisher name is empty.");
+
+  }
+
+  $obj["data"]["attributes"]["publisher"] = [
+        "name" => $publisher_name,
+        "schemeUri" => "https://ror.org/",
+        "nameIdentifier" => $publisher_ror,
+        "nameIdentifierScheme" => "ROR",
+      ];
+
+  // License
+  if (!$entity->get("field_license")->isEmpty()) {
+    $license_term = $entity->get("field_license")->entity;
+    if ($license_term) {
+      $rights = [
+        "rights" => $license_term->label(),
+      ];
+
+      if (!$license_term->get("field_external_uri")->isEmpty()) {
+        $rights["rightsUri"] = $license_term->get("field_external_uri")->uri;
+      }
+
+      $obj["data"]["attributes"]["rightsList"][] = $rights;
+    }
+  }
+
 	$descriptions = get_output_descriptions($entity);
+
+  // Metasys uses platform homepage as landing page
 	$data_service = $entity->get("field_data_service")->getValue();
 	$data_service_is_url = $config->get("data_service_is_url");
 
-	foreach ($agents_people as $agent_person) {
-		array_push($agents_people_ids, $agent_person["target_id"]);
-	}
-
-	foreach ($agents_orgs as $agent_org) {
-		array_push($agents_orgs_ids, $agent_org["target_id"]);
-	}
-
-	$people_creators = get_entities_with_agent_role("digitalia_muni_entity", $agents_people_ids, "field_agent_role", "field_related_person", $tid_creator);
-	$people_publishers = get_entities_with_agent_role("digitalia_muni_entity", $agents_people_ids, "field_agent_role", "field_related_person", $tid_publisher);
-
-	$orgs_creators = get_entities_with_agent_role("digitalia_muni_entity", $agents_orgs_ids, "field_agent_role", "field_related_organisation", $tid_creator);
-	$orgs_publishers = get_entities_with_agent_role("digitalia_muni_entity", $agents_orgs_ids, "field_agent_role", "field_related_organisation", $tid_publisher);
-
-	$creators = array_merge($people_creators, $orgs_creators);
-	$publishers = array_merge($people_publishers, $orgs_publishers);
-	$out_creators = array();
-	$out_publishers= array();
-
-	foreach ($creators as $creator_id) {
-		$creator = \Drupal::entityTypeManager()->getStorage("digitalia_muni_entity")->load($creator_id["target_id"]);
-		array_push($out_creators, get_output_creator($creator));
-	}
-
-	foreach ($publishers as $publisher_id) {
-		$publisher = \Drupal::entityTypeManager()->getStorage("digitalia_muni_entity")->load($publisher_id["target_id"]);
-		array_push($out_publishers, get_output_publisher($publisher));
-	}
-
 	// publicationYear
 	$publication_year = $entity->get("field_publication_year")->getValue()[0]["value"];
+  $obj["data"]["attributes"]["publicationYear"] = $publication_year;
 
 	// resourceTypeGeneral
 	// We have to get title of different taxonomy with specified authority source iri
-	$coar_resource_type_id = $entity->get("field_resource_type")->getValue()[0]["target_id"];
+  // this needs to be united across platforms - Metasys:
+  /* 	
+  $coar_resource_type_id = $entity->get("field_resource_type")->getValue()[0]["target_id"];
 	$coar_resource_type = \Drupal::entityTypeManager()->getStorage("taxonomy_term")->load($coar_resource_type_id);
+
 	$authority_links = $coar_resource_type->get("field_authority_link")->getValue();
 	$datacite_iri = null;
 
@@ -109,22 +135,44 @@ function digitalia_muni_dataset_doi_doi_datacite_json_alter($entity, $extra, &$d
 			$datacite_resource_type = $datacite_resource_type_list[array_keys($datacite_resource_type_list)[0]]->label();
 		}
 	}
+  */
+  //$coar_resource_type = $entity->get("field_resource_type")->getValue()[0]["value"];
+  //if (!empty($coar_resource_type)) {
+  //  $obj["data"]["attributes"]["resourceType"] = $coar_resource_type;
+  //}
+  $datacite_resource_type = "Dataset";
+  $obj["data"]["attributes"]["types"]["resourceTypeGeneral"] = $datacite_resource_type;
+  
+  // TODO Related Resources
+  /*
+  $related_resources = $entity->get("field_related_resource"); // links to entity digitalia_muni_entity_types of type resource
 
+    "relatedIdentifiers": [
+    {
+      "schemeUri": null,
+      "schemeType": null,
+      "relationType": "IsDescribedBy", // field_resource_relation_type
+      "relatedIdentifier": "10.48550/ARXIV.2402.13343", // field_identifier
+      "resourceTypeGeneral": "JournalArticle", // field_resource_type
+      "relatedIdentifierType": "DOI", // must be added to MM
+      "relatedMetadataScheme": null,
+      "relationTypeInformation": null
+    }
+  ],
 
-	// Populate output json
+  $obj["data"]["attributes"]["relatedIdentifiers"] = [];
+  */
+
+  // skip for ArchaeoVault
+  /*
 	if ($data_service_is_url && !empty($data_service)) {
 		$obj["data"]["attributes"]["url"] = $data_service[0]["uri"];
 	}
+  */
 
 	if (!empty($descriptions)) {
 		$obj["data"]["attributes"]["descriptions"] = $descriptions;
 	}
-
-	$obj["data"]["attributes"]["creators"] = $out_creators;
-	// only one publisher is permitted
-	$obj["data"]["attributes"]["publisher"] = $out_publishers[0];
-	$obj["data"]["attributes"]["types"]["resourceTypeGeneral"] = $datacite_resource_type;
-	$obj["data"]["attributes"]["publicationYear"] = $publication_year;
 
 	// useless until update action is implemented
 	if (!empty($entity->get("field_doi")->getValue())) {
@@ -132,7 +180,15 @@ function digitalia_muni_dataset_doi_doi_datacite_json_alter($entity, $extra, &$d
 		unset($obj["data"]["id"]);
 	}
 
-	$datacite_json = json_encode($obj);
+	// Temporary debug stop: log the payload and prevent sending anything to DataCite.
+  /*
+	error_log('digitalia_muni_dataset_doi payload: ' . json_encode($obj, JSON_PRETTY_PRINT));
+	\Drupal::logger('dataset_doi_datacite')->notice('DataCite payload for testing: @payload', [
+		'@payload' => json_encode($obj, JSON_PRETTY_PRINT),
+	]);
+  exit;
+  */
+  $datacite_json = json_encode($obj);
 }
 
 /**
@@ -143,170 +199,75 @@ function do_crash()
 	array_keys($jdasklfjklj);
 }
 
-/**
- * Returns entities with role specified by @param role_tid
- * Assumes relation entity with reference to another entity
- *
- * @param string $entity_type
- *
- * @param array $entity_ids
- *
- * @param string $field_role
- *
- * @param string $field_related_entity
- *
- * @param string $role_tid
- *
- * @return array
- *
- */
-function get_entities_with_agent_role($entity_type, array $entity_ids, $field_role, $field_related_entity, $role_tid)
-{
-	$output = array();
-
-	foreach ($entity_ids as $entity_id) {
-		$referenced_entity = \Drupal::entityTypeManager()->getStorage($entity_type)->load($entity_id);
-		$agent_roles = $referenced_entity->get($field_role)->getValue();
-
-		foreach ($agent_roles as $role) {
-			if ($role["target_id"] == $role_tid) {
-				array_push($output, $referenced_entity->get($field_related_entity)->getValue()[0]);
-			}
-		}
-	}
-
-	return $output;
-}
 
 /**
- * Returns array representation of creator with name, nameType and identifier fields filled
+ * Returns array representation of agent with name, nameType and identifier fields filled
  *
- * @param ContentEntityBase $creator
+ * @param ContentEntityBase $agent
  *
  * @return array
  */
-function get_output_creator($creator)
+function get_datacite_agents_array($agent)
 {
-	$out_creator = array();
-	$identifiers = array();
-	$has_identifier = FALSE;
+	$result = [];
 
-	if ($creator->bundle() == "person") {
-		$has_first_name = !$creator->get("field_first_names")->isEmpty();
-		$has_last_name = !$creator->get("field_last_names")->isEmpty();
+	$agent_type = trim((string) $agent->get("agent_type")->getString());
+	$name = trim((string) $agent->get("name")->getString());
+	$first_name = trim((string) $agent->get("first_names")->getString());
+	$last_name = trim((string) $agent->get("last_names")->getString());
+	$orcid = trim((string) $agent->get("orcid")->getString());
+	$ror = trim((string) $agent->get("ror")->getString());
+	$institution_affiliation = trim((string) $agent->get("institution_affiliation")->getString());
 
-		$first_name = $creator->get("field_first_names")->getValue()[0]["value"];
-		$last_name = $creator->get("field_last_names")->getValue()[0]["value"];
-		$name_type = "Personal";
+	if ($agent_type === "person") {
+    $result["givenName"] = $first_name;
+		$result["familyName"] = $last_name;
 
-		if ($has_first_name && $has_last_name) {
-			$out_creator["name"] = "{$last_name}, {$first_name}";
+		if ($first_name && $last_name) {
+			$result["name"] = "{$last_name}, {$first_name}";
+      $result["nameType"] = "Personal";
+		} else {
+			$result["name"] = trim("{$first_name} {$last_name}");
+      $result["nameType"] = "Organizational";
 		}
 
-		if ($has_first_name && !$has_last_name) {
-			$out_creator["name"] = "{$first_name}";
-		}
+    if ($orcid !== "") {
+      $result["nameIdentifiers"][] = [
+        "schemeUri" => "https://orcid.org",
+        "nameIdentifier" => $orcid,
+        "nameIdentifierScheme" => "ORCID",
+      ];
+    }
 
-		if (!$has_first_name && $has_last_name) {
-			$out_creator["name"] = "{$last_name}";
-		}
+    if ($institution_affiliation !== "" || $ror !== "") {
+      $affiliation = [];
+      if ($institution_affiliation !== "") {
+        $affiliation["name"] = $institution_affiliation;
+      }
+      if ($ror !== "") {
+        $affiliation["affiliationIdentifier"] = $ror;
+        $affiliation["affiliationIdentifierScheme"] = "ROR";
+        $affiliation["schemeUri"] = "https://ror.org/";
+      }
 
-		$out_creator["nameType"] = $name_type;
-
-		// Person has only ORCID identifier field
-		$has_identifier = !$creator->get("field_orcid")->isEmpty();
-		$identifier = $creator->get("field_orcid")->getValue()[0]["value"];
-		$identifier_scheme = "ORCID";
-		$identifier_scheme_uri = "https://orcid.org/";
+      if (!empty($affiliation)) {
+        $result["affiliation"] = [$affiliation];
+      }
+    }
+	} else {
+		$result["name"] = "Organizational";
+		$result["name"] = $name;
+    if ($ror !== "") {
+      $result["nameIdentifiers"][] = [
+        "schemeUri" => "https://ror.org/",
+        "nameIdentifier" => $ror,
+        "nameIdentifierScheme" => "ROR",
+      ];
+    }
 	}
-
-	if ($creator->bundle() == "organisation") {
-		$name = $creator->get("field_corporate_body_name")->getValue()[0]["value"];
-		$name_type = "Organizational";
-
-		$out_creator["name"] = $name;
-		$out_creator["nameType"] = $name_type;
-
-		// Organisation can only have ROR identifier
-		$has_identifier = !$creator->get("field_ror")->isEmpty();
-		$identifier = $creator->get("field_ror")->getValue()[0]["value"];
-		$identifier_scheme = "ROR";
-		$identifier_scheme_uri = "https://ror.org/";
-	}
-
-	if ($has_identifier) {
-		$out_creator["nameIdentifiers"] = [[
-			"schemeUri" => $identifier_scheme_uri,
-			"nameIdentifier" => $identifier,
-			"nameIdentifierScheme" => $identifier_scheme,
-		],
-		];
-	}
-
-	if (!empty($out_creator)) {
-		return $out_creator;
-	}
+	return $result;
 }
 
-/**
- * Returns array representation of publisher with name and identifier fields filled
- *
- * @param ContentEntityBase $publisher
- *
- * @return array
- */
-function get_output_publisher($publisher)
-{
-	$out_publisher = array();
-	$has_identifier = FALSE;
-
-	if ($publisher->bundle() == "person") {
-		$has_first_name = !$publisher->get("field_first_names")->isEmpty();
-		$has_last_name = !$publisher->get("field_last_names")->isEmpty();
-
-		$first_name = $publisher->get("field_first_names")->getValue()[0]["value"];
-		$last_name = $publisher->get("field_last_names")->getValue()[0]["value"];
-
-		if ($has_first_name && $has_last_name) {
-			$out_publisher["name"] = "{$last_name}, {$first_name}";
-		}
-
-		if ($has_first_name && !$has_last_name) {
-			$out_publisher["name"] = "{$first_name}";
-		}
-
-		if (!$has_first_name && $has_last_name) {
-			$out_publisher["name"] = "{$last_name}";
-		}
-
-		// Person has only ORCID identifier field
-		$has_identifier = !$publisher->get("field_orcid")->isEmpty();
-		$identifier = $publisher->get("field_orcid")->getValue()[0]["value"];
-		$identifier_scheme = "ORCID";
-		$identifier_scheme_uri = "https://orcid.org/";
-	}
-
-	if ($publisher->bundle() == "organisation") {
-		$name = $publisher->get("field_corporate_body_name")->getValue()[0]["value"];
-		$out_publisher["name"] = $name;
-
-		// Organisation can only have ROR identifier
-		$has_identifier = !$publisher->get("field_ror")->isEmpty();
-		$identifier = $publisher->get("field_ror")->getValue()[0]["value"];
-		$identifier_scheme = "ROR";
-		$identifier_scheme_uri = "https://ror.org/";
-	}
-
-	if ($has_identifier) {
-		$out_publisher["schemeUri"] = $identifier_scheme_uri;
-		$out_publisher["publisherIdentifier"] = $identifier;
-		$out_publisher["publisherIdentifierScheme"] = $identifier_scheme;
-	}
-
-	if (!empty($out_publisher)) {
-		return $out_publisher;
-	}
-}
 
 /**
  * Returns array with description. All tags are removed.
